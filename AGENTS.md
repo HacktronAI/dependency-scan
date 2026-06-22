@@ -14,8 +14,8 @@ Guidance for coding agents working in this repository.
 
 ## Contracts
 
-- The action is fast-mode only and uses Hacktron's public API proxy:
-  `https://api.hacktron.ai/v1/hfw`.
+- The action is fast-mode only and uses Hacktron's staging public API proxy:
+  `https://api-staging.hacktron.ai/v1/hfw`.
 - Do not add Cloudflare Access inputs or require repository secrets for the
   default public dependency scan.
 - Keep `action.yml` thin. Put parsing, validation, and JSON handling in Python

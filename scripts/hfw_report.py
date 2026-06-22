@@ -15,7 +15,7 @@ Design follows the Socket / Semgrep convention:
   - malicious -> block the check; suspicious -> advisory only
 
 Inputs (env):
-  HFW_SERVER                  default https://api.hacktron.ai/v1/hfw
+  HFW_SERVER                  default https://api-staging.hacktron.ai/v1/hfw
   HFW_PUBLIC_BASE_URL         default https://hfw.hacktron.ai
 
   Multi-project mode (preferred):
@@ -51,7 +51,9 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-HFW_SERVER = os.environ.get("HFW_SERVER", "https://api.hacktron.ai/v1/hfw").rstrip("/")
+HFW_SERVER = os.environ.get(
+    "HFW_SERVER", "https://api-staging.hacktron.ai/v1/hfw"
+).rstrip("/")
 HFW_PUBLIC_BASE_URL = os.environ.get(
     "HFW_PUBLIC_BASE_URL", "https://hfw.hacktron.ai"
 ).rstrip("/")

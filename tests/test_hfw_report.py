@@ -821,6 +821,9 @@ def test_probe_short_circuits_traversal_attempt(monkeypatch):
 
 def test_verdict_url_keeps_scoped_slash_literal():
     url = hfw._verdict_url("npm", "@babel/runtime", "7.24.0", 8)
+    assert url.startswith(
+        "https://api-staging.hacktron.ai/v1/hfw/verdict/npm/@babel/runtime?"
+    )
     assert "/verdict/npm/@babel/runtime?" in url
     assert "%2F" not in url
     assert "scan_mode" not in url
@@ -835,11 +838,13 @@ def test_verdict_url_preserves_direct_hfw_v1_contract(monkeypatch):
 
 
 def test_verdict_url_does_not_double_v1_for_public_api_proxy(monkeypatch):
-    monkeypatch.setattr(hfw, "HFW_SERVER", "https://api.hacktron.ai/v1/hfw")
+    monkeypatch.setattr(hfw, "HFW_SERVER", "https://api-staging.hacktron.ai/v1/hfw")
 
     url = hfw._verdict_url("npm", "@babel/runtime", "7.24.0", 8)
 
-    assert url.startswith("https://api.hacktron.ai/v1/hfw/verdict/npm/@babel/runtime?")
+    assert url.startswith(
+        "https://api-staging.hacktron.ai/v1/hfw/verdict/npm/@babel/runtime?"
+    )
     assert "/v1/hfw/v1/" not in url
 
 

@@ -26,7 +26,7 @@ def main() -> int:
         targets = lockfiles or lockfile
         tracked = None
         for raw in targets.splitlines():
-            path = "".join(raw.split())
+            path = raw.strip()
             if not path:
                 continue
             if any(char in path for char in "*?["):
