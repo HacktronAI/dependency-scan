@@ -2,11 +2,12 @@
 
 Diff-aware supply-chain scanning for pull requests. The action checks npm and
 PyPI dependencies added or changed by a PR against Hacktron's public malware
-feed, posts one sticky PR comment, and fails the workflow when malicious
-packages are introduced.
+feed, posts a summary of dependency changes, and fails the workflow when [malicious
+packages](https://unit42.paloaltonetworks.com/monitoring-npm-supply-chain-attacks/)
+are introduced.
 
 The default scan is free to run, fast-mode only, and does not require an API
-key or Cloudflare Access credentials.
+key.
 
 ## Usage
 
@@ -18,13 +19,13 @@ name: Hacktron Dependency Scan
 on:
   pull_request:
     paths:
-      - '**/package-lock.json'
-      - '**/pnpm-lock.yaml'
-      - '**/npm-shrinkwrap.json'
-      - '**/pyproject.toml'
-      - '**/uv.lock'
-      - '**/requirements*.txt'
-      - '**/requirements/*.txt'
+      - "**/package-lock.json"
+      - "**/pnpm-lock.yaml"
+      - "**/npm-shrinkwrap.json"
+      - "**/pyproject.toml"
+      - "**/uv.lock"
+      - "**/requirements*.txt"
+      - "**/requirements/*.txt"
 
 permissions:
   contents: read
@@ -46,13 +47,13 @@ jobs:
 The action compares the base branch manifest to the PR manifest and scans only
 packages that were added or changed by the PR. Supported manifests:
 
-| Ecosystem | Files |
-| --- | --- |
-| npm | `package-lock.json`, `npm-shrinkwrap.json`, `pnpm-lock.yaml` |
-| PyPI | `pyproject.toml`, `uv.lock`, `requirements*.txt`, `requirements/*.txt` |
+| Ecosystem | Files                                                                  |
+| --------- | ---------------------------------------------------------------------- |
+| npm       | `package-lock.json`, `npm-shrinkwrap.json`, `pnpm-lock.yaml`           |
+| PyPI      | `pyproject.toml`, `uv.lock`, `requirements*.txt`, `requirements/*.txt` |
 
 If no `lockfile` or `lockfiles` input is set, supported manifests are
-auto-discovered from tracked files using `git ls-files`.
+auto-discovered from tracked files.
 
 ## Outcomes
 
@@ -67,20 +68,20 @@ packages fail the workflow by default.
 
 ## Inputs
 
-| Input | Default | Description |
-| --- | --- | --- |
-| `lockfile` | empty | Single manifest to scan. Mutually exclusive in practice with `lockfiles`. |
-| `lockfiles` | empty | Newline-separated manifest paths or bash-style path patterns. |
-| `ignore-file` | `.hfwignore` | Optional allowlist file, one `name@version` per line. |
-| `fail-on-malicious` | `true` | Fail the check when malicious packages are introduced. Allowed: `true`, `false`. |
+| Input               | Default      | Description                                                                      |
+| ------------------- | ------------ | -------------------------------------------------------------------------------- |
+| `lockfile`          | empty        | Single manifest to scan. Mutually exclusive in practice with `lockfiles`.        |
+| `lockfiles`         | empty        | Newline-separated manifest paths or bash-style path patterns.                    |
+| `ignore-file`       | `.hfwignore` | Optional allowlist file, one `name@version` per line.                            |
+| `fail-on-malicious` | `true`       | Fail the check when malicious packages are introduced. Allowed: `true`, `false`. |
 
 ## Outputs
 
-| Output | Description |
-| --- | --- |
-| `malicious_count` | Number of malicious packages introduced by the PR. |
-| `suspicious_count` | Number of suspicious packages introduced by the PR. |
-| `diff_count` | Total added or changed packages considered by the action. |
+| Output             | Description                                               |
+| ------------------ | --------------------------------------------------------- |
+| `malicious_count`  | Number of malicious packages introduced by the PR.        |
+| `suspicious_count` | Number of suspicious packages introduced by the PR.       |
+| `diff_count`       | Total added or changed packages considered by the action. |
 
 ## Selecting Manifests
 

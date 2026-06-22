@@ -14,7 +14,7 @@ def main() -> int:
     projects: list[dict[str, str]] = []
 
     for raw in os.environ.get("TARGETS", "").splitlines():
-        path = "".join(raw.split())
+        path = raw.strip()
         if not path:
             continue
         projects.append(extract_manifest(path))
