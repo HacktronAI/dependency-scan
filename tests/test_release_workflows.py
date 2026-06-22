@@ -42,6 +42,32 @@ def test_release_please_runs_on_main_merges_and_manual_dispatch():
     }
 
 
+def test_ci_enforces_conventional_commit_subjects():
+    workflow = load_workflow(".github/workflows/ci.yml")
+
+    job = workflow["jobs"]["conventional-commits"]
+    steps = job["steps"]
+
+    pr_title_step = next(
+        step for step in steps if step.get("name") == "Validate pull request title"
+    )
+    assert pr_title_step["if"] == "github.event_name == 'pull_request'"
+    assert (
+        pr_title_step["run"]
+        == 'python scripts/github_action/validate_commit_subjects.py "$PR_TITLE"'
+    )
+
+    pushed_commits_step = next(
+        step for step in steps if step.get("name") == "Validate pushed commit subjects"
+    )
+    assert pushed_commits_step["if"] == "github.event_name == 'push'"
+    assert "git log --format=%s" in pushed_commits_step["run"]
+    assert (
+        "scripts/github_action/validate_commit_subjects.py"
+        in pushed_commits_step["run"]
+    )
+
+
 def test_release_please_manifest_tracks_project_version():
     config = json.loads((REPO_ROOT / "release-please-config.json").read_text())
     manifest = json.loads((REPO_ROOT / ".release-please-manifest.json").read_text())
