@@ -1,0 +1,18 @@
+repos:
+  - repo: local
+    hooks:
+      - id: hfw-action-format
+        name: Hacktron action Python format
+        entry: uv run --locked ruff format --check .
+        language: system
+        pass_filenames: false
+      - id: hfw-action-lint
+        name: Hacktron action Python lint
+        entry: uv run --locked ruff check .
+        language: system
+        pass_filenames: false
+      - id: hfw-action-test
+        name: Hacktron action tests
+        entry: uv run --locked pytest
+        language: system
+        pass_filenames: false

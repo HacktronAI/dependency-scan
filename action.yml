@@ -1,0 +1,119 @@
+name: 'Hacktron Dependency Scan'
+description: 'Diff-aware npm and PyPI supply-chain scan for pull requests. Posts a sticky PR comment and fails when malicious packages are introduced.'
+author: 'Hacktron'
+branding:
+  icon: 'shield'
+  color: 'red'
+
+inputs:
+  lockfile:
+    description: 'Single manifest to scan. If neither `lockfile` nor `lockfiles` is set, supported manifests are auto-discovered from tracked git files.'
+    required: false
+    default: ''
+  lockfiles:
+    description: 'Newline-separated list of manifest paths or bash-style path patterns. If unset, supported manifests are auto-discovered from tracked git files.'
+    required: false
+    default: ''
+  ignore-file:
+    description: 'Optional allowlist file; one name@version per line'
+    required: false
+    default: '.hfwignore'
+  fail-on-malicious:
+    description: 'Fail the check when the PR introduces malicious packages. Allowed: true, false.'
+    required: false
+    default: 'true'
+outputs:
+  malicious_count:
+    description: 'Number of malicious packages introduced by this PR'
+    value: ${{ steps.report.outputs.malicious_count }}
+  suspicious_count:
+    description: 'Number of suspicious packages introduced by this PR'
+    value: ${{ steps.report.outputs.suspicious_count }}
+  diff_count:
+    description: 'Total packages added or changed in this PR'
+    value: ${{ steps.report.outputs.diff_count }}
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+
+    - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+      with:
+        version: '0.8.11'
+
+    - name: Validate action inputs
+      id: input_contract
+      shell: bash
+      env:
+        FAIL_ON_MALICIOUS: ${{ inputs.fail-on-malicious }}
+      run: |
+        uv run --project "${{ github.action_path }}" --locked python "${{ github.action_path }}/scripts/github_action/validate_inputs.py"
+
+    - name: Resolve manifest paths
+      id: resolve
+      shell: bash
+      env:
+        LOCKFILES: ${{ inputs.lockfiles }}
+        LOCKFILE: ${{ inputs.lockfile }}
+      run: |
+        uv run --project "${{ github.action_path }}" --locked python "${{ github.action_path }}/scripts/github_action/resolve_manifests.py"
+
+    - name: Resolve base ref
+      id: base
+      shell: bash
+      run: |
+        BASE="${{ github.event.pull_request.base.ref }}"
+        if [ -z "${BASE}" ]; then BASE="${{ github.event.repository.default_branch }}"; fi
+        echo "ref=${BASE}" >> "$GITHUB_OUTPUT"
+        git fetch --no-tags --depth=1 origin "${BASE}" || true
+
+    - name: Extract base + head manifests
+      id: lockfiles
+      shell: bash
+      env:
+        BASE_REF: ${{ steps.base.outputs.ref }}
+        TARGETS: ${{ steps.resolve.outputs.paths }}
+      run: |
+        uv run --project "${{ github.action_path }}" --locked python "${{ github.action_path }}/scripts/github_action/extract_manifests.py"
+
+    - name: Run dependency scan report
+      id: report
+      shell: bash
+      env:
+        HFW_IGNORE_FILE: ${{ inputs.ignore-file }}
+        HFW_REPORT_OUT: .hfw-tmp/comment.md
+        HFW_PROJECTS_FILE: ${{ steps.lockfiles.outputs.projects_file }}
+        HFW_SCAN_MODE: fast
+      run: |
+        export HFW_PROJECTS="$(cat "$HFW_PROJECTS_FILE")"
+        uv run --project "${{ github.action_path }}" --locked python "${{ github.action_path }}/scripts/hfw_report.py"
+
+    - name: Find existing sticky comment
+      if: github.event_name == 'pull_request'
+      id: existing
+      uses: peter-evans/find-comment@v3
+      with:
+        token: ${{ github.token }}
+        issue-number: ${{ github.event.pull_request.number }}
+        comment-author: github-actions[bot]
+        body-includes: <!-- hacktron-dependency-scan-comment -->
+
+    - name: Upsert sticky PR comment
+      if: github.event_name == 'pull_request'
+      uses: peter-evans/create-or-update-comment@v4
+      with:
+        token: ${{ github.token }}
+        comment-id: ${{ steps.existing.outputs.comment-id }}
+        issue-number: ${{ github.event.pull_request.number }}
+        body-path: .hfw-tmp/comment.md
+        edit-mode: replace
+
+    - name: Fail if PR introduces malicious packages
+      if: steps.input_contract.outputs.fail_on_malicious == 'true' && steps.report.outputs.malicious_count != '0'
+      shell: bash
+      run: |
+        echo "::error::Hacktron blocked ${{ steps.report.outputs.malicious_count }} malicious package(s) introduced by this PR."
+        exit 1

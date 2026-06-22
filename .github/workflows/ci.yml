@@ -1,0 +1,135 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: '0.8.11'
+
+      - name: Check uv.lock is up to date
+        run: uv lock --check
+
+      - name: Install dependencies
+        run: uv sync --locked --group dev
+
+      - name: Check formatting
+        run: uv run --locked ruff format --check .
+
+      - name: Lint
+        run: uv run --locked ruff check .
+
+      - name: Compile scripts
+        run: uv run --locked python -m py_compile scripts/hfw_report.py scripts/github_action/*.py
+
+      - name: Run tests
+        run: uv run --locked pytest
+
+  action-contract:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: '0.8.11'
+
+      - name: Install dependencies
+        run: uv sync --locked --group dev
+
+      - name: Validate action metadata
+        run: |
+          uv run --locked python - <<'PY'
+          from pathlib import Path
+
+          import yaml
+
+          action = yaml.safe_load(Path("action.yml").read_text(encoding="utf-8"))
+
+          assert action["runs"]["using"] == "composite"
+          assert action["branding"]["icon"] == "shield"
+          assert action["branding"]["color"] == "red"
+          assert "hfw-server" not in action["inputs"]
+          assert "ecosystem" not in action["inputs"]
+          assert "parallel" not in action["inputs"]
+          assert "wait-seconds" not in action["inputs"]
+          assert "scan-mode" not in action["inputs"]
+          assert "deep-mode" not in action["inputs"]
+          assert "github-token" not in action["inputs"]
+          assert "cf-access-client-id" not in action["inputs"]
+          assert "cf-access-client-secret" not in action["inputs"]
+          PY
+
+      - name: Smoke-test helper scripts
+        run: |
+          set -euo pipefail
+          tmpdir="$(mktemp -d)"
+          trap 'rm -rf "$tmpdir"' EXIT
+          repo="$PWD"
+
+          cd "$tmpdir"
+          validate_out="$tmpdir/validate_out.txt"
+          FAIL_ON_MALICIOUS=TRUE \
+            GITHUB_OUTPUT="$validate_out" \
+            uv run --project "$repo" --locked python "$repo/scripts/github_action/validate_inputs.py"
+          grep -q '^fail_on_malicious=true$' "$validate_out"
+
+          git init -q
+          git config user.email test@example.com
+          git config user.name test
+          printf '{"lockfileVersion":3,"packages":{}}\n' > package-lock.json
+          mkdir -p requirements
+          printf 'requests==2.32.0\n' > requirements/prod.txt
+          git add package-lock.json requirements/prod.txt
+          git commit -q -m init
+          git branch -M main
+
+          resolve_out="$tmpdir/resolve_out.txt"
+          LOCKFILES='' LOCKFILE='' GITHUB_OUTPUT="$resolve_out" \
+            uv run --project "$repo" --locked python "$repo/scripts/github_action/resolve_manifests.py"
+
+          projects_out="$tmpdir/projects_out.txt"
+          TARGETS="$(awk '/^paths<<HFW_EOF$/{flag=1;next}/^HFW_EOF$/{flag=0}flag' "$resolve_out")" \
+            BASE_REF=main GITHUB_OUTPUT="$projects_out" \
+            uv run --project "$repo" --locked python "$repo/scripts/github_action/extract_manifests.py"
+
+          uv run --project "$repo" --locked python - <<PY
+          import json
+          from pathlib import Path
+
+          projects = json.loads(Path("$tmpdir/.hfw-tmp/projects.json").read_text())
+          assert len(projects) == 2, projects
+          assert {p["ecosystem"] for p in projects} == {"npm", "pypi"}, projects
+          assert {p["label"] for p in projects} == {"root", "requirements"}, projects
+          PY
