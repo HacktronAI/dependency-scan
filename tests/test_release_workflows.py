@@ -36,10 +36,26 @@ def test_release_please_runs_on_main_merges_and_manual_dispatch():
         for step in steps
         if step.get("uses") == "googleapis/release-please-action@v4"
     )
+    assert release_step["id"] == "release"
     assert release_step["with"] == {
         "config-file": "release-please-config.json",
         "manifest-file": ".release-please-manifest.json",
     }
+
+    checkout_step = next(
+        step for step in steps if step.get("uses") == "actions/checkout@v4"
+    )
+    assert checkout_step["if"] == "steps.release.outputs.release_created == 'true'"
+    assert checkout_step["with"] == {"fetch-depth": 0}
+
+    tag_step = next(step for step in steps if step.get("name") == "Move major tag")
+    assert tag_step["if"] == "steps.release.outputs.release_created == 'true'"
+    assert tag_step["env"] == {
+        "TAG_NAME": "${{ steps.release.outputs.tag_name }}",
+        "MAJOR": "${{ steps.release.outputs.major }}",
+    }
+    assert 'major_tag="v${MAJOR}"' in tag_step["run"]
+    assert 'git push origin "refs/tags/$major_tag" --force' in tag_step["run"]
 
 
 def test_ci_enforces_conventional_commit_subjects():
@@ -90,23 +106,3 @@ def test_release_please_manifest_tracks_project_version():
         }
     }
     assert manifest == {".": pyproject["project"]["version"]}
-
-
-def test_release_workflow_updates_major_tag_after_published_semver_release():
-    workflow = load_workflow(".github/workflows/release.yml")
-
-    assert workflow["name"] == "Release"
-    assert workflow["on"] == {"release": {"types": ["published"]}}
-    assert workflow["permissions"] == {"contents": "write"}
-
-    job = workflow["jobs"]["move-major-tag"]
-    assert job["if"] == "startsWith(github.event.release.tag_name, 'v')"
-
-    run_script = "\n".join(
-        step.get("run", "")
-        for step in job["steps"]
-        if step.get("name") == "Move major tag"
-    )
-    assert r"^v[0-9]+\.[0-9]+\.[0-9]+([.-].*)?$" in run_script
-    assert 'major="${TAG_NAME%%.*}"' in run_script
-    assert 'git push origin "refs/tags/$major" --force' in run_script
