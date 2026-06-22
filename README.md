@@ -162,12 +162,22 @@ uv run --locked pre-commit run --all-files
 
 ## Release
 
+Merges to `main` run the `Release PR` workflow. It uses release-please to
+create or update a release pull request from Conventional Commit history. Use
+`fix:`, `feat:`, and `BREAKING CHANGE:` when merging user-facing changes so the
+next version is calculated correctly.
+
 1. Update the README if inputs, outputs, or behavior changed.
 2. Run the full local check suite.
-3. Merge to `main`.
-4. Create a semver tag such as `v1.0.0`.
-5. Move or create the major tag, such as `v1`, to the same commit.
-6. Draft a GitHub release from the semver tag.
+3. Merge the change to `main`.
+4. Review the release-please pull request that updates `CHANGELOG.md` and the
+   release manifest.
+5. Merge the release pull request to publish the semver tag and GitHub release.
+
+The `Release` workflow runs after a GitHub release is published and moves the
+major tag, such as `v1`, to the same commit as the semver tag. Use the
+`Release PR` workflow dispatch button if the release PR needs to be recreated
+or refreshed.
 
 Marketplace users should pin to a major tag (`@v1`) or exact version
 (`@v1.0.0`) depending on their update policy.
