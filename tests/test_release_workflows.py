@@ -80,6 +80,13 @@ def test_release_please_manifest_tracks_project_version():
             "release-type": "simple",
             "changelog-path": "CHANGELOG.md",
             "include-component-in-tag": False,
+            "extra-files": [
+                {
+                    "type": "toml",
+                    "path": "pyproject.toml",
+                    "jsonpath": "$.project.version",
+                }
+            ],
         }
     }
     assert manifest == {".": pyproject["project"]["version"]}
