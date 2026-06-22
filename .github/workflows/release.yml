@@ -23,6 +23,10 @@ jobs:
           TAG_NAME: ${{ github.event.release.tag_name }}
         run: |
           set -euo pipefail
+          if [[ ! "$TAG_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-].*)?$ ]]; then
+            echo "::notice::Skipping major tag update for non-semver tag $TAG_NAME"
+            exit 0
+          fi
           major="${TAG_NAME%%.*}"
           git tag -f "$major" "$TAG_NAME"
           git push origin "refs/tags/$major" --force
