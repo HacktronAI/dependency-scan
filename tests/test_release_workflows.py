@@ -62,6 +62,7 @@ def test_ci_enforces_conventional_commit_subjects():
     )
     assert pushed_commits_step["if"] == "github.event_name == 'push'"
     assert "git log --format=%s" in pushed_commits_step["run"]
+    assert 'git cat-file -e "$BEFORE_SHA^{commit}"' in pushed_commits_step["run"]
     assert (
         "scripts/github_action/validate_commit_subjects.py"
         in pushed_commits_step["run"]
