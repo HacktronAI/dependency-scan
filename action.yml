@@ -1,5 +1,5 @@
 name: 'Hacktron Dependency Scan'
-description: 'Diff-aware npm and PyPI supply-chain scan for pull requests. Posts a sticky PR comment and fails when malicious packages are introduced.'
+description: 'Diff-aware npm and PyPI supply-chain scan for pull requests.'
 author: 'Hacktron'
 branding:
   icon: 'shield'
