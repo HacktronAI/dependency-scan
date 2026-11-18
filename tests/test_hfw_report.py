@@ -621,6 +621,82 @@ def test_probe_treats_rate_limited_json_body_as_error(monkeypatch):
     assert r["level"] == "unknown"
 
 
+class _FakeResponse:
+    status = 200
+
+    def __init__(self, body: bytes):
+        self._body = body
+
+    def read(self) -> bytes:
+        return self._body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+def _http_429(retry_after: str):
+    import email.message
+    import io
+    import urllib.error
+
+    headers = email.message.Message()
+    headers["retry-after-short"] = retry_after
+    return urllib.error.HTTPError(
+        "https://example.test", 429, "Too Many Requests", headers, io.BytesIO(b"{}")
+    )
+
+
+def test_http_get_json_retries_after_rate_limit(monkeypatch):
+    responses = [_http_429("2"), _FakeResponse(b'{"status": "ready"}')]
+    sleeps: list[float] = []
+
+    def fake_urlopen(req, timeout):
+        item = responses.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+    monkeypatch.setattr(hfw.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(hfw.time, "sleep", sleeps.append)
+    assert hfw.http_get_json("https://example.test", 5) == (
+        200,
+        {"status": "ready"},
+        None,
+    )
+    assert sleeps == [2]
+
+
+def test_http_get_json_gives_up_after_rate_limit_retries(monkeypatch):
+    calls = {"n": 0}
+
+    def fake_urlopen(req, timeout):
+        calls["n"] += 1
+        raise _http_429("1")
+
+    monkeypatch.setattr(hfw.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(hfw.time, "sleep", lambda s: None)
+    status, _body, _err = hfw.http_get_json("https://example.test", 5)
+    assert status == 429
+    assert calls["n"] == hfw.RATE_LIMIT_RETRIES + 1
+
+
+@pytest.mark.parametrize(
+    ("headers", "expected"),
+    [
+        ({}, 1),
+        ({"retry-after-short": "1", "retry-after-long": "30"}, 30),
+        ({"Retry-After": "0"}, 1),
+        ({"retry-after-long": "120"}, 60),
+        ({"retry-after-medium": "soon"}, 1),
+    ],
+)
+def test_retry_after_seconds_takes_longest_window_clamped(headers, expected):
+    assert hfw._retry_after_seconds(headers) == expected
+
+
 def test_probe_no_error_when_server_returns_pending(monkeypatch):
     """A 'pending' verdict means the scan is running; that's not an error."""
     calls = {"n": 0}

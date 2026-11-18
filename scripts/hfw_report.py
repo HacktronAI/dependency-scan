@@ -30,6 +30,7 @@ Inputs (env):
 
   HFW_VERDICT_WAIT_SECONDS    seconds to wait for in-progress scans (default 0)
   HFW_PARALLEL                concurrent verdict requests (default 4)
+  HFW_RATE_LIMIT_RETRIES      retries per lookup after an HTTP 429 (default 6)
   HFW_IGNORE_FILE             optional allowlist (one name@version per line)
   HFW_REPORT_OUT              where to write the comment markdown
 
@@ -45,6 +46,7 @@ import json
 import os
 import re
 import sys
+import time
 import tomllib
 import urllib.error
 import urllib.parse
@@ -95,6 +97,7 @@ def detect_ecosystem(path: Path) -> str | None:
 
 
 AUTH_FAIL_CODES = {401, 403}
+RATE_LIMIT_RETRIES = int(os.environ.get("HFW_RATE_LIMIT_RETRIES", "6"))
 
 
 # Package-name / version validators. Lockfile contents are attacker-controlled
@@ -158,9 +161,12 @@ def _package_detail_url(ecosystem: str, name: str, version: str) -> str:
     )
 
 
-def http_get_json(url: str, timeout: float) -> tuple[int, dict, str | None]:
+def http_get_json(
+    url: str, timeout: float, retries: int = RATE_LIMIT_RETRIES
+) -> tuple[int, dict, str | None]:
     """Return (http_status, body_json, error_message). error_message is None
-    on a clean HTTP response (even 4xx with JSON body)."""
+    on a clean HTTP response (even 4xx with JSON body). A 429 is retried after
+    the server's retry-after window, at most `retries` times."""
     headers = {"User-Agent": "hfw-ci-report/1.0"}
     req = urllib.request.Request(url, headers=headers)
     try:
@@ -171,6 +177,11 @@ def http_get_json(url: str, timeout: float) -> tuple[int, dict, str | None]:
             except json.JSONDecodeError:
                 return resp.status, {}, f"non-json body (status={resp.status})"
     except urllib.error.HTTPError as exc:
+        if exc.code == 429 and retries > 0:
+            wait = _retry_after_seconds(exc.headers)
+            exc.close()
+            time.sleep(wait)
+            return http_get_json(url, timeout, retries - 1)
         try:
             return (
                 exc.code,
@@ -181,6 +192,16 @@ def http_get_json(url: str, timeout: float) -> tuple[int, dict, str | None]:
             return exc.code, {}, f"http error {exc.code}"
     except Exception as exc:
         return -1, {}, str(exc)
+
+
+def _retry_after_seconds(headers) -> int:
+    """Longest Retry-After / Retry-After-<window> value, clamped to 1-60s."""
+    waits = [
+        int(value)
+        for key, value in (headers or {}).items()
+        if key.lower().startswith("retry-after") and value.strip().isdigit()
+    ]
+    return max(1, min(max(waits, default=1), 60))
 
 
 def parse_pnpm_lock(path: Path) -> set[tuple[str, str]]:
