@@ -291,7 +291,14 @@ def parse_package_lock_json(path: Path) -> set[tuple[str, str]]:
             idx = key.rfind(marker)
             if idx < 0:
                 continue
-            name = key[idx + len(marker) :]
+            # npm aliases (`foo@npm:bar@1.0.0`) key the entry by the alias and
+            # record the registry package in `name`.
+            alias_of = meta.get("name")
+            name = (
+                alias_of
+                if isinstance(alias_of, str) and alias_of
+                else key[idx + len(marker) :]
+            )
             if name:
                 out.add((name, version))
         return out

@@ -138,6 +138,26 @@ def test_parse_package_lock_v3_handles_nested_node_modules(tmp_path: Path):
     assert ("diff", "5.0.0") in parsed
 
 
+def test_parse_package_lock_v3_uses_real_name_for_npm_alias(tmp_path: Path):
+    """`npm install http-client@npm:axios@1.14.1` writes the alias as the key
+    and the registry package as `name`; the verdict must be for axios."""
+    lock = tmp_path / "package-lock.json"
+    lock.write_text(
+        """{
+      "name": "demo", "version": "1.0.0", "lockfileVersion": 3,
+      "packages": {
+        "": {"name": "demo", "dependencies": {"http-client": "npm:axios@1.14.1"}},
+        "node_modules/http-client": {"name": "axios", "version": "1.14.1"},
+        "node_modules/lodash": {"version": "4.17.21"}
+      }
+    }"""
+    )
+    assert hfw.parse_package_lock_json(lock) == {
+        ("axios", "1.14.1"),
+        ("lodash", "4.17.21"),
+    }
+
+
 def test_parse_package_lock_v3_skips_workspace_links(tmp_path: Path):
     lock = tmp_path / "package-lock.json"
     lock.write_text("""{
