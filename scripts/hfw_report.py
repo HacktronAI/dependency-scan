@@ -656,7 +656,8 @@ def probe(ecosystem: str, name: str, version: str) -> dict:
     max wait per request) until the total budget WAIT_SECONDS is exhausted.
 
     `error` is set when the request never produced a usable verdict (network
-    failure, auth, 5xx). `level` is "unknown" when the server simply hasn't
+    failure, auth, 5xx, or any response without a verdict status, such as the
+    throttler's JSON 429). `level` is "unknown" when the server simply hasn't
     finished scanning in time -- those two cases are very different and
     main() treats `error` as a hard failure but `unknown` as advisory.
     """
@@ -701,6 +702,10 @@ def probe(ecosystem: str, name: str, version: str) -> dict:
     # to us properly. We explicitly demand a parseable verdict envelope before
     # declaring success.
     is_server_error = last_error is not None or not last_body.get("status")
+    error = None
+    if is_server_error:
+        # A JSON error body (e.g. the throttler's 429) leaves last_error unset.
+        error = last_error or f"http error {last_status}"
 
     return {
         "ecosystem": ecosystem,
@@ -711,7 +716,7 @@ def probe(ecosystem: str, name: str, version: str) -> dict:
         "level": (last_body.get("level") or "unknown"),
         "summary": (last_body.get("summary") or ""),
         "cached": last_body.get("cached", False),
-        "error": last_error if is_server_error else None,
+        "error": error,
     }
 
 

@@ -607,6 +607,20 @@ def test_probe_marks_connection_failure_as_error(monkeypatch):
     assert r["error"] == "name resolution failed"
 
 
+def test_probe_treats_rate_limited_json_body_as_error(monkeypatch):
+    """The throttler's 429 has a JSON body but no verdict; it must fail the
+    run, not count as a passing 'unknown'."""
+
+    def fake_get(url: str, timeout: float):
+        return 429, {"statusCode": 429, "message": "Too Many Requests"}, None
+
+    monkeypatch.setattr(hfw, "http_get_json", fake_get)
+    monkeypatch.setattr(hfw, "WAIT_SECONDS", 1)
+    r = hfw.probe("npm", "debug", "4.4.2")
+    assert r["error"] == "http error 429"
+    assert r["level"] == "unknown"
+
+
 def test_probe_no_error_when_server_returns_pending(monkeypatch):
     """A 'pending' verdict means the scan is running; that's not an error."""
     calls = {"n": 0}
@@ -650,7 +664,7 @@ def test_probe_treats_200_without_status_as_error(monkeypatch):
     monkeypatch.setattr(hfw, "http_get_json", fake_get)
     monkeypatch.setattr(hfw, "WAIT_SECONDS", 1)
     r = hfw.probe("pypi", "fastapi", "0.136.1")
-    assert r["error"] is not None or r["level"] == "unknown"
+    assert r["error"] == "http error 200"
     assert r["verdict_status"] is None
 
 
