@@ -1,6 +1,6 @@
 [project]
 name = "dependency-scan"
-version = "1.0.0"
+version = "1.0.1"
 description = "Public GitHub Action for Hacktron dependency scans."
 readme = "README.md"
 requires-python = ">=3.11"
