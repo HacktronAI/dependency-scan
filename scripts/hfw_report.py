@@ -163,7 +163,7 @@ def _package_detail_url(ecosystem: str, name: str, version: str) -> str:
 
 def http_get_json(
     url: str, timeout: float, retries: int = RATE_LIMIT_RETRIES
-) -> tuple[int, dict, str | None]:
+) -> tuple[int, object, str | None]:
     """Return (http_status, body_json, error_message). error_message is None
     on a clean HTTP response (even 4xx with JSON body). A 429 is retried after
     the server's retry-after window, at most `retries` times."""
@@ -683,11 +683,10 @@ def probe(ecosystem: str, name: str, version: str) -> dict:
     """Ask the verdict server for an opinion. Polls in 8s windows (server's
     max wait per request) until the total budget WAIT_SECONDS is exhausted.
 
-    `error` is set when the request never produced a usable verdict (network
-    failure, auth, 5xx, or any response without a verdict status, such as the
-    throttler's JSON 429). `level` is "unknown" when the server simply hasn't
-    finished scanning in time -- those two cases are very different and
-    main() treats `error` as a hard failure but `unknown` as advisory.
+    `error` is set for network/HTTP failures and malformed or failed verdicts.
+    Without an error, `level` is "unknown" only for valid pending/scanning
+    responses that did not finish in time. main() treats errors as hard
+    failures and in-progress scans as advisory.
     """
     coord_error = _validate_coord(ecosystem, name, version)
     if coord_error:
@@ -713,35 +712,44 @@ def probe(ecosystem: str, name: str, version: str) -> dict:
         url = _verdict_url(ecosystem, name, version, per_request_wait)
         status, body, err = http_get_json(url, timeout=per_request_wait + 10)
         last_status = status
-        last_body = body
+        last_body = body if isinstance(body, dict) else {}
         last_error = err
-        if err is not None and status in AUTH_FAIL_CODES:
+        if not isinstance(body, dict):
+            last_error = err or f"non-object JSON body (status={status})"
             break
-        if err is not None and status < 0:
+        if err is not None or not 200 <= status < 300:
             break
         verdict_status = body.get("status")
-        if verdict_status not in {"pending", "scanning"}:
+        if verdict_status not in ("pending", "scanning"):
             break
         spent += per_request_wait
         if spent >= deadline:
             break
 
-    # Any non-JSON body or unknown verdict status means the server didn't talk
-    # to us properly. We explicitly demand a parseable verdict envelope before
-    # declaring success.
-    is_server_error = last_error is not None or not last_body.get("status")
-    error = None
-    if is_server_error:
-        # A JSON error body (e.g. the throttler's 429) leaves last_error unset.
-        error = last_error or f"http error {last_status}"
+    # A JSON error body can have a truthy `status` (e.g. HFW's scan errors),
+    # so require both HTTP success and a recognized verdict envelope.
+    verdict_status = last_body.get("status")
+    level = last_body.get("level")
+    error = last_error
+    if error is None:
+        if not 200 <= last_status < 300:
+            error = f"http error {last_status}"
+        elif verdict_status not in ("ready", "pending", "scanning"):
+            error = f"invalid verdict status {verdict_status!r} (status={last_status})"
+        elif verdict_status == "ready" and level not in (
+            "clean",
+            "suspicious",
+            "malicious",
+        ):
+            error = f"invalid verdict level {level!r} (status={last_status})"
 
     return {
         "ecosystem": ecosystem,
         "name": name,
         "version": version,
         "http": last_status,
-        "verdict_status": last_body.get("status"),
-        "level": (last_body.get("level") or "unknown"),
+        "verdict_status": verdict_status,
+        "level": level if error is None and verdict_status == "ready" else "unknown",
         "summary": (last_body.get("summary") or ""),
         "cached": last_body.get("cached", False),
         "error": error,
@@ -798,6 +806,7 @@ def render(
     unknown = [
         r for r in results if r["level"] not in {"malicious", "suspicious", "clean"}
     ]
+    errored = [r for r in results if r["error"]]
 
     multi = len(projects) > 1
     total_diff = len(results)
@@ -814,7 +823,11 @@ def render(
             lines.append(f"<sub>Scanned {len(projects)} project(s): {scanned}</sub>")
         return "\n".join(lines) + "\n"
 
-    if malicious:
+    if errored:
+        lines.append(
+            f"**Scan failed — could not get verdicts for {len(errored)} package(s).**"
+        )
+    elif malicious:
         lines.append(
             "**Blocking — "
             f"{len(malicious)} malicious package(s) introduced by this PR.**"
@@ -823,6 +836,11 @@ def render(
         lines.append(
             f"Review — {len(suspicious)} suspicious package(s) introduced by "
             "this PR. Merge is allowed."
+        )
+    elif unknown:
+        lines.append(
+            "No malicious packages found in completed lookups; "
+            f"{len(unknown)} dependency(ies) still have no verdict."
         )
     else:
         lines.append(f"All {total_diff} new/changed dependencies look clean.")

@@ -66,6 +66,18 @@ auto-discovered from tracked files.
 Suspicious package signals are shown in the PR comment, but only malicious
 packages fail the workflow by default.
 
+HTTP 429 responses are retried after the longest numeric `Retry-After` or
+`Retry-After-*` header, bounded to 1–60 seconds per retry. Each lookup retries
+up to six times by default; set the `HFW_RATE_LIMIT_RETRIES` environment
+variable to override this count. Exhausted retries, other HTTP errors, and
+malformed or failed verdict responses produce `ERROR`, even when
+`fail-on-malicious` is disabled. Error runs stop before posting a PR comment.
+Valid `pending` or `scanning` responses remain advisory and are shown as
+dependencies without a verdict, rather than described as clean.
+
+For npm lockfiles with a `packages` map, aliases are checked using the registry
+package name recorded in the entry's `name` field.
+
 ## Inputs
 
 | Input               | Default      | Description                                                                      |

@@ -8,6 +8,7 @@ tests cover the same surface the action depends on.
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
@@ -760,8 +761,108 @@ def test_probe_treats_200_without_status_as_error(monkeypatch):
     monkeypatch.setattr(hfw, "http_get_json", fake_get)
     monkeypatch.setattr(hfw, "WAIT_SECONDS", 1)
     r = hfw.probe("pypi", "fastapi", "0.136.1")
-    assert r["error"] == "http error 200"
+    assert r["error"] is not None
     assert r["verdict_status"] is None
+
+
+@pytest.mark.parametrize(
+    ("status", "body"),
+    [
+        (401, {"status": "error"}),
+        (403, {"status": "ready", "level": "clean"}),
+        (404, {"status": "unknown"}),
+        (422, {"status": "error", "error": "download failed"}),
+        (429, {"status": "pending"}),
+        (503, {"status": "error"}),
+        (200, {"status": "error"}),
+        (200, {"status": "unexpected"}),
+        (200, {"status": ["ready"]}),
+        (200, {"status": "ready"}),
+        (200, {"status": "ready", "level": "error"}),
+        (200, {"status": "ready", "level": "unexpected"}),
+        (200, {"status": "ready", "level": ["clean"]}),
+        (200, []),
+        (200, None),
+        (200, "upstream error"),
+    ],
+)
+def test_probe_rejects_unusable_verdicts(monkeypatch, status, body):
+    calls = []
+
+    def fake_get(url, timeout):
+        calls.append(url)
+        return status, body, None
+
+    monkeypatch.setattr(hfw, "http_get_json", fake_get)
+    monkeypatch.setattr(hfw, "WAIT_SECONDS", 16)
+    result = hfw.probe("npm", "debug", "4.4.2")
+    assert result["error"]
+    assert result["level"] == "unknown"
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("level", ["clean", "suspicious", "malicious"])
+def test_probe_accepts_completed_verdicts(monkeypatch, level):
+    monkeypatch.setattr(
+        hfw,
+        "http_get_json",
+        lambda url, timeout: (200, {"status": "ready", "level": level}, None),
+    )
+    result = hfw.probe("npm", "debug", "4.4.2")
+    assert result["error"] is None
+    assert result["level"] == level
+
+
+def test_probe_polls_scanning_until_ready(monkeypatch):
+    responses = iter(
+        [
+            (202, {"status": "scanning"}, None),
+            (200, {"status": "ready", "level": "malicious"}, None),
+        ]
+    )
+    monkeypatch.setattr(hfw, "http_get_json", lambda url, timeout: next(responses))
+    monkeypatch.setattr(hfw, "WAIT_SECONDS", 16)
+    result = hfw.probe("npm", "debug", "4.4.2")
+    assert result["error"] is None
+    assert result["level"] == "malicious"
+
+
+def test_main_fails_when_rate_limit_retries_are_exhausted(
+    monkeypatch, tmp_path, capsys
+):
+    head = tmp_path / "package-lock.json"
+    head.write_text('{"packages":{"node_modules/debug":{"version":"4.4.2"}}}')
+    output = tmp_path / "outputs.txt"
+    report = tmp_path / "comment.md"
+    monkeypatch.setenv(
+        "HFW_PROJECTS",
+        json.dumps(
+            [
+                {
+                    "label": "root",
+                    "head": str(head),
+                    "base": str(tmp_path / "base" / "package-lock.json"),
+                    "ecosystem": "npm",
+                }
+            ]
+        ),
+    )
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    monkeypatch.setattr(hfw, "OUT_PATH", report)
+    monkeypatch.setattr(hfw, "IGNORE_FILE", tmp_path / ".hfwignore")
+    monkeypatch.setattr(hfw.time, "sleep", lambda seconds: None)
+    calls = []
+
+    def fake_urlopen(req, timeout):
+        calls.append(req.full_url)
+        raise _http_429("1")
+
+    monkeypatch.setattr(hfw.urllib.request, "urlopen", fake_urlopen)
+    assert hfw.main() == 3
+    assert len(calls) == hfw.RATE_LIMIT_RETRIES + 1
+    assert "error_count=1\n" in output.read_text()
+    assert "http error 429" in capsys.readouterr().err
+    assert "look clean" not in report.read_text()
 
 
 # ---------------------------------------------------------------------------
@@ -854,6 +955,14 @@ def test_render_empty_diff_single_project_omits_scanned_footer():
     md = hfw.render([{"label": "root"}], [], set())
     assert "No dependency changes detected in this PR." in md
     assert "Scanned" not in md
+
+
+def test_render_incomplete_lookups_does_not_claim_clean():
+    result = _result("root", "debug", "4.4.2", "unknown")
+    result["verdict_status"] = "pending"
+    md = hfw.render([{"label": "root"}], [result], set())
+    assert "look clean" not in md
+    assert "still have no verdict" in md
 
 
 # ---------------------------------------------------------------------------
